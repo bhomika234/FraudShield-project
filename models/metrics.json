@@ -1,0 +1,12 @@
+{
+    "split_method": "chronological 80/20 by Time",
+    "training_rows": 227845,
+    "testing_rows": 56962,
+    "training_fraud_cases": 417,
+    "testing_fraud_cases": 75,
+    "pr_auc": 0.8195816169614027,
+    "roc_auc": 0.9491635464458781,
+    "fraud_precision": 0.9818181818181818,
+    "fraud_recall": 0.72,
+    "scale_pos_weight": 545.3908872901678
+}

@@ -1,0 +1,19 @@
+{
+    "model": "Isolation Forest",
+    "split_method": "chronological 80/20 by Time",
+    "training_rows": 227845,
+    "testing_rows": 56962,
+    "training_fraud_cases": 417,
+    "testing_fraud_cases": 75,
+    "contamination": 0.0017,
+    "pr_auc": 0.04044866877008339,
+    "roc_auc": 0.950139750733911,
+    "fraud_precision": 0.0,
+    "fraud_recall": 0.0,
+    "fraud_f1": 0.0,
+    "false_positive_rate": 0.001019565102747552,
+    "true_negatives": 56829,
+    "false_positives": 58,
+    "false_negatives": 75,
+    "true_positives": 0
+}

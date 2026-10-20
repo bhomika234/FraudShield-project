@@ -1,0 +1,19 @@
+{
+    "model": "Optuna-tuned XGBoost",
+    "split_method": "Chronological 80/20 with time-ordered validation",
+    "optuna_trials": 50,
+    "best_validation_pr_auc": 0.7877920261361891,
+    "test_pr_auc": 0.7907586492185353,
+    "test_roc_auc": 0.9859878941292972,
+    "test_precision": 0.76,
+    "test_recall": 0.76,
+    "best_parameters": {
+        "n_estimators": 131,
+        "max_depth": 5,
+        "learning_rate": 0.09750604565981946,
+        "subsample": 0.7086606355274218,
+        "colsample_bytree": 0.9917023367061502,
+        "min_child_weight": 1,
+        "reg_lambda": 0.5142636999682572
+    }
+}

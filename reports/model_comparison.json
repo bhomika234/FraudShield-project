@@ -1,0 +1,14 @@
+{
+    "XGBoost": {
+        "PR-AUC": 0.7907586492185353,
+        "ROC-AUC": 0.9859878941292972,
+        "Fraud Precision": 0.76,
+        "Fraud Recall": 0.76
+    },
+    "Isolation Forest": {
+        "PR-AUC": 0.04044866877008339,
+        "ROC-AUC": 0.950139750733911,
+        "Fraud Precision": 0.0,
+        "Fraud Recall": 0.0
+    }
+}

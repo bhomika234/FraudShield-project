@@ -1,0 +1,13 @@
+{
+    "model": "XGBoost",
+    "split_method": "chronological 80/20 by Time",
+    "training_rows": 227845,
+    "testing_rows": 56962,
+    "training_fraud_cases": 417,
+    "testing_fraud_cases": 75,
+    "scale_pos_weight": 545.3908872901678,
+    "pr_auc": 0.7969167878393062,
+    "roc_auc": 0.9881057769496253,
+    "fraud_precision": 0.7215189873417721,
+    "fraud_recall": 0.76
+}

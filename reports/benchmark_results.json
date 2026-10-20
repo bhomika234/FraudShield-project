@@ -1,0 +1,8 @@
+{
+    "total_requests": 100,
+    "successful_requests": 100,
+    "average_response_ms": 28.87,
+    "median_response_ms": 28.69,
+    "fastest_response_ms": 23.14,
+    "slowest_response_ms": 43.35
+}

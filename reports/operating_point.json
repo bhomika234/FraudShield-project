@@ -1,0 +1,14 @@
+{
+    "model": "Optuna-tuned XGBoost",
+    "target_fpr": 0.01,
+    "threshold": 0.01017184741795063,
+    "validation_fpr": 0.004701540083924687,
+    "validation_recall": 0.8653846153846154,
+    "test_fpr": 0.01485400882451175,
+    "test_recall_at_selected_threshold": 0.8666666666666667,
+    "test_true_negatives": 56042,
+    "test_false_positives": 845,
+    "test_false_negatives": 10,
+    "test_true_positives": 65,
+    "note": "Threshold selected using a separate chronological validation model. Test data was not used to select the threshold. Test FPR may differ from the 1% validation target."
+}

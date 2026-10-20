@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# MLflow local files
+mlflow.db
+mlflow.db-shm
+mlflow.db-wal
+mlruns/
+
+# Temporary files
+*.log
+.pytest_cache/
+
+# Large datasets
+data/creditcard.csv
+data/*.zip
+
+# Generated model artifacts
+models/*.pkl
