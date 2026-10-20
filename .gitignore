@@ -33,3 +33,5 @@ data/*.zip
 
 # Generated model artifacts
 models/*.pkl
+
+!models/xgboost_fraud_model_tuned.pkl
