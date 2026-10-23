@@ -1,5 +1,17 @@
 {
-    "XGBoost": {
+    "evaluation": {
+        "split_method": "Chronological 80/20 by transaction time",
+        "testing_rows": 56962,
+        "testing_fraud_cases": 75,
+        "note": "Metrics are read from existing reports. Confirm that saved test metrics use the same test split and evaluation procedure. Precision and recall may use different decision thresholds."
+    },
+    "Baseline XGBoost": {
+        "PR-AUC": 0.7969167878393062,
+        "ROC-AUC": 0.9881057769496253,
+        "Fraud Precision": 0.7215189873417721,
+        "Fraud Recall": 0.76
+    },
+    "Tuned XGBoost": {
         "PR-AUC": 0.7907586492185353,
         "ROC-AUC": 0.9859878941292972,
         "Fraud Precision": 0.76,
@@ -10,5 +22,16 @@
         "ROC-AUC": 0.950139750733911,
         "Fraud Precision": 0.0,
         "Fraud Recall": 0.0
+    },
+    "Tuned XGBoost Operating Point": {
+        "threshold": 0.01017184741795063,
+        "target_validation_fpr": 0.01,
+        "validation_fpr": 0.004701540083924687,
+        "validation_recall": 0.8653846153846154,
+        "test_fpr": 0.01485400882451175,
+        "test_recall": 0.8666666666666667,
+        "test_true_positives": 65,
+        "test_false_negatives": 10,
+        "test_false_positives": 845
     }
 }
