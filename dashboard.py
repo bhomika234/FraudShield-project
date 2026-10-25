@@ -1,99 +1,138 @@
 
-import os
+import json
 import time
 from pathlib import Path
 
+import joblib
 import pandas as pd
-import requests
 import streamlit as st
 
 # --------------------------------------------------
 # Configuration
 # --------------------------------------------------
+
 BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "models" / "xgboost_fraud_model_tuned.pkl"
+THRESHOLD_PATH = BASE_DIR / "reports" / "operating_point.json"
 DATA_PATH = BASE_DIR / "data" / "creditcard.csv"
 
-API_BASE_URL = os.getenv(
-    "FRAUDSHIELD_API_URL",
-    "http://127.0.0.1:8000",
-).strip().rstrip("/")
-
-PREDICT_URL = f"{API_BASE_URL}/predict"
-TRANSACTION_LIMIT = 100
-
-FEATURE_COLUMNS = [
+EXPECTED_FEATURES = [
     "Time",
     *[f"V{i}" for i in range(1, 29)],
     "Amount",
 ]
-REQUIRED_COLUMNS = FEATURE_COLUMNS + ["Class"]
 
 st.set_page_config(
-    page_title="FraudShield Dashboard",
+    page_title="FraudShield | Fraud Detection",
     page_icon="🛡️",
     layout="wide",
 )
 
-st.title("🛡️ FraudShield — Transaction Monitoring")
-st.caption(
-    "Credit card fraud monitoring powered by FastAPI and tuned XGBoost."
-)
+st.title("🛡️ FraudShield")
+st.caption("Credit Card Fraud Detection — XGBoost")
+st.divider()
+
 
 # --------------------------------------------------
-# Dataset loading
+# Load model and threshold
 # --------------------------------------------------
+
+@st.cache_resource
+def load_model():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+    return joblib.load(MODEL_PATH)
+
+
 @st.cache_data
-def load_test_data(path, modified_time):
-    latest_rows = pd.DataFrame()
+def load_threshold():
+    if not THRESHOLD_PATH.exists():
+        return 0.5
 
-    for chunk in pd.read_csv(
-        path,
-        usecols=REQUIRED_COLUMNS,
-        chunksize=10_000,
-        low_memory=True,
-    ):
-        latest_rows = pd.concat(
-            [latest_rows, chunk],
-            ignore_index=True,
-        ).tail(TRANSACTION_LIMIT)
+    with open(THRESHOLD_PATH, "r", encoding="utf-8") as file:
+        config = json.load(file)
 
-    if latest_rows.empty:
-        raise ValueError("The dataset is empty.")
+    if isinstance(config, dict):
+        for key in (
+            "threshold",
+            "fraud_threshold",
+            "operating_threshold",
+            "best_threshold",
+        ):
+            if key in config:
+                return float(config[key])
 
-    return latest_rows.reset_index(drop=True)
+    if isinstance(config, (float, int)):
+        return float(config)
 
-
-def create_demo_data(rows=TRANSACTION_LIMIT):
-    return pd.DataFrame({
-        "Time": [float(i * 60) for i in range(rows)],
-        **{
-            f"V{i}": [0.0] * rows
-            for i in range(1, 29)
-        },
-        "Amount": [
-            float(10 + (i * 17) % 500)
-            for i in range(rows)
-        ],
-        "Class": [0] * rows,
-    })
+    return 0.5
 
 
-if DATA_PATH.exists():
-    try:
-        test_data = load_test_data(
-            str(DATA_PATH),
-            DATA_PATH.stat().st_mtime,
-        )
-        data_mode = "Local credit-card dataset"
-    except Exception as exc:
-        st.warning(
-            f"Could not load CSV: {exc}. Using synthetic demo data."
-        )
-        test_data = create_demo_data()
-        data_mode = "Synthetic demo data"
-else:
-    test_data = create_demo_data()
-    data_mode = "Synthetic demo data"
+try:
+    model = load_model()
+    FRAUD_THRESHOLD = load_threshold()
+    st.success("Model loaded successfully")
+except Exception as exc:
+    st.error(f"Could not load model: {exc}")
+    st.stop()
+
+
+# --------------------------------------------------
+# Load transactions
+# --------------------------------------------------
+
+def create_demo_data(rows=100):
+    demo = pd.DataFrame(
+        0.0,
+        index=range(rows),
+        columns=EXPECTED_FEATURES,
+    )
+    demo["Time"] = [i * 60 for i in range(rows)]
+    demo["Amount"] = [
+        float((i * 37) % 500 + 10)
+        for i in range(rows)
+    ]
+    return demo
+
+
+def load_transactions():
+    if DATA_PATH.exists():
+        try:
+            data = pd.read_csv(DATA_PATH)
+
+            missing = [
+                col for col in EXPECTED_FEATURES
+                if col not in data.columns
+            ]
+
+            if missing:
+                raise ValueError(
+                    f"Missing required features: {missing}"
+                )
+
+            data = data[EXPECTED_FEATURES].copy()
+            data = data.apply(pd.to_numeric, errors="raise")
+            data = data.replace(
+                [float("inf"), float("-inf")],
+                float("nan"),
+            )
+            data = data.dropna()
+
+            if not data.empty:
+                return (
+                    data.reset_index(drop=True),
+                    "Local credit-card dataset",
+                )
+
+        except Exception as exc:
+            st.warning(
+                f"Could not load CSV: {exc}. Using demo data."
+            )
+
+    return create_demo_data(), "Synthetic demo data"
+
+
+test_data, data_mode = load_transactions()
 
 st.info(
     f"Data source: **{data_mode}**. "
@@ -104,217 +143,330 @@ if test_data.empty:
     st.error("No transactions are available.")
     st.stop()
 
+
 # --------------------------------------------------
 # Session state
 # --------------------------------------------------
+
 defaults = {
     "streaming": False,
     "next_index": 0,
     "results": [],
-    "fraud_count": 0,
-    "latencies": [],
-    "api_errors": 0,
+    "prediction_errors": 0,
 }
 
 for key, value in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = value
 
-# --------------------------------------------------
-# Sidebar
-# --------------------------------------------------
-st.sidebar.header("Control Panel")
 
-stream_speed = st.sidebar.slider(
-    "Interval between transactions (seconds)",
-    min_value=1,
-    max_value=5,
-    value=1,
+# --------------------------------------------------
+# Sidebar controls
+# --------------------------------------------------
+
+st.sidebar.header("Control Panel")
+st.sidebar.caption("Prediction mode: Direct model inference")
+st.sidebar.caption(
+    f"Fraud threshold: {FRAUD_THRESHOLD:.6f}"
 )
 
-st.sidebar.caption(f"API endpoint: {PREDICT_URL}")
-st.sidebar.caption(f"Transactions available: {len(test_data)}")
+max_transactions = len(test_data)
 
-if st.sidebar.button(
-    "▶ Start / Restart Monitoring",
+scan_limit = st.sidebar.slider(
+    "Transactions to scan",
+    min_value=1,
+    max_value=max_transactions,
+    value=min(100, max_transactions),
+)
+
+start_button = st.sidebar.button(
+    "▶ Start Monitoring",
     use_container_width=True,
-):
-    st.session_state.streaming = True
-    st.session_state.next_index = 0
-    st.session_state.results = []
-    st.session_state.fraud_count = 0
-    st.session_state.latencies = []
-    st.session_state.api_errors = 0
-    st.rerun()
+)
 
-if st.sidebar.button(
+stop_button = st.sidebar.button(
     "⏹ Stop Monitoring",
     use_container_width=True,
-):
-    st.session_state.streaming = False
-    st.rerun()
+)
 
-if st.sidebar.button(
-    "🗑 Clear Results",
+reset_button = st.sidebar.button(
+    "🔄 Reset Results",
     use_container_width=True,
-):
+)
+
+
+# --------------------------------------------------
+# Handle controls
+# --------------------------------------------------
+
+if reset_button:
     st.session_state.streaming = False
     st.session_state.next_index = 0
     st.session_state.results = []
-    st.session_state.fraud_count = 0
-    st.session_state.latencies = []
-    st.session_state.api_errors = 0
+    st.session_state.prediction_errors = 0
     st.rerun()
 
+if start_button:
+    # Start a new scan if the previous scan has finished.
+    if st.session_state.next_index >= scan_limit:
+        st.session_state.next_index = 0
+        st.session_state.results = []
+        st.session_state.prediction_errors = 0
+
+    st.session_state.streaming = True
+
+if stop_button:
+    st.session_state.streaming = False
+
+
 # --------------------------------------------------
-# Results display
+# Prediction
 # --------------------------------------------------
-def display_results():
-    if not st.session_state.results:
-        st.info("No transactions processed yet.")
-        return
 
-    result_df = pd.DataFrame(st.session_state.results)
+def predict_transaction(transaction):
+    start_time = time.perf_counter()
 
-    def highlight_decision(row):
-        if row["Decision"] == "FRAUD":
-            return [
-                "background-color: #7f1d1d; color: white"
-            ] * len(row)
-
-        if row["Decision"] == "API_ERROR":
-            return [
-                "background-color: #78350f; color: white"
-            ] * len(row)
-
-        return [""] * len(row)
-
-    st.dataframe(
-        result_df.style.apply(highlight_decision, axis=1),
-        width="stretch",
-        hide_index=True,
+    input_df = pd.DataFrame(
+        [transaction],
+        columns=EXPECTED_FEATURES,
     )
 
-# --------------------------------------------------
-# Live monitor
-# Metrics and feed refresh together in this fragment.
-# --------------------------------------------------
-@st.fragment(
-    run_every=stream_speed if st.session_state.streaming else None
-)
-def transaction_monitor():
+    probability = float(
+        model.predict_proba(input_df)[0][1]
+    )
 
-    if st.session_state.streaming:
+    prediction = (
+        "FRAUD"
+        if probability >= FRAUD_THRESHOLD
+        else "LEGITIMATE"
+    )
+
+    latency_ms = (
+        time.perf_counter() - start_time
+    ) * 1000
+
+    return prediction, probability, latency_ms
+
+
+# --------------------------------------------------
+# Run monitoring
+# One transaction per rerun keeps Stop responsive.
+# --------------------------------------------------
+
+if st.session_state.streaming:
+    if st.session_state.next_index >= scan_limit:
+        st.session_state.streaming = False
+        st.success("Monitoring completed.")
+    else:
+        progress = st.progress(0)
+        status_text = st.empty()
+
         index = st.session_state.next_index
 
-        if index >= len(test_data):
-            st.session_state.streaming = False
-            st.success("Monitoring completed for all sample transactions.")
+        status_text.write(
+            f"Processing transaction {index + 1} "
+            f"of {scan_limit}..."
+        )
+
+        transaction = (
+            test_data.iloc[index][EXPECTED_FEATURES].tolist()
+        )
+        transaction_dict = dict(
+            zip(EXPECTED_FEATURES, transaction)
+        )
+
+        try:
+            prediction, probability, latency_ms = (
+                predict_transaction(transaction_dict)
+            )
+
+            st.session_state.results.append({
+                "Transaction ID": index + 1,
+                "Prediction": prediction,
+                "Fraud Probability": round(probability, 6),
+                "Latency (ms)": round(latency_ms, 2),
+                "Status": "OK",
+            })
+
+        except Exception as exc:
+            st.session_state.prediction_errors += 1
+
+            st.session_state.results.append({
+                "Transaction ID": index + 1,
+                "Prediction": "PREDICTION_ERROR",
+                "Fraud Probability": None,
+                "Latency (ms)": None,
+                "Status": str(exc),
+            })
+
+        st.session_state.next_index += 1
+
+        progress.progress(
+            min(
+                st.session_state.next_index / scan_limit,
+                1.0,
+            )
+        )
+
+        st.rerun()
+
+
+# --------------------------------------------------
+# Metrics
+# --------------------------------------------------
+
+results = st.session_state.results
+display_df = pd.DataFrame(results)
+
+if not display_df.empty:
+    fraud_count = int(
+        (display_df["Prediction"] == "FRAUD").sum()
+    )
+
+    legitimate_count = int(
+        (display_df["Prediction"] == "LEGITIMATE").sum()
+    )
+
+    error_count = int(
+        (display_df["Prediction"] == "PREDICTION_ERROR").sum()
+    )
+
+    valid_latencies = display_df["Latency (ms)"].dropna()
+
+    avg_latency = (
+        float(valid_latencies.mean())
+        if not valid_latencies.empty
+        else 0.0
+    )
+else:
+    fraud_count = 0
+    legitimate_count = 0
+    error_count = 0
+    avg_latency = 0.0
+
+
+col1, col2, col3, col4, col5 = st.columns(5)
+
+col1.metric("Transactions Scanned", len(results))
+col2.metric("Fraud Detected", fraud_count)
+col3.metric("Legitimate", legitimate_count)
+col4.metric(
+    "Avg Prediction Latency",
+    f"{avg_latency:.2f} ms",
+)
+col5.metric("Prediction Errors", error_count)
+
+st.divider()
+
+
+# --------------------------------------------------
+# Results table and separate tabs
+# --------------------------------------------------
+
+st.subheader("Transaction Monitoring Results")
+
+if not display_df.empty:
+    columns_to_show = [
+        "Transaction ID",
+        "Prediction",
+        "Fraud Probability",
+        "Latency (ms)",
+        "Status",
+    ]
+
+    all_tab, legitimate_tab, fraud_tab = st.tabs([
+        "All Transactions",
+        "Legitimate Transactions",
+        "Fraud Transactions",
+    ])
+
+    with all_tab:
+        st.dataframe(
+            display_df[columns_to_show],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with legitimate_tab:
+        legitimate_df = display_df[
+            display_df["Prediction"] == "LEGITIMATE"
+        ]
+
+        st.metric(
+            "Legitimate Transactions",
+            len(legitimate_df),
+        )
+
+        if legitimate_df.empty:
+            st.info(
+                "No legitimate transactions in the current results."
+            )
         else:
-            row = test_data.iloc[index]
+            st.dataframe(
+                legitimate_df[columns_to_show],
+                use_container_width=True,
+                hide_index=True,
+            )
 
-            payload = {
-                f"V{i}": float(row[f"V{i}"])
-                for i in range(1, 29)
-            }
-            payload["Time"] = float(row["Time"])
-            payload["Amount"] = float(row["Amount"])
+    with fraud_tab:
+        fraud_df = display_df[
+            display_df["Prediction"] == "FRAUD"
+        ]
 
-            start_time = time.perf_counter()
+        st.metric(
+            "Fraud Transactions",
+            len(fraud_df),
+        )
 
-            try:
-                response = requests.post(
-                    PREDICT_URL,
-                    json=payload,
-                    timeout=10,
-                )
-                latency_ms = (
-                    time.perf_counter() - start_time
-                ) * 1000
+        if fraud_df.empty:
+            st.info(
+                "No fraud transactions in the current results."
+            )
+        else:
+            st.dataframe(
+                fraud_df[columns_to_show],
+                use_container_width=True,
+                hide_index=True,
+            )
 
-                response.raise_for_status()
-                result = response.json()
-
-                decision = str(result["decision"]).upper()
-                probability = float(result["fraud_probability"])
-
-                if decision == "FRAUD":
-                    st.session_state.fraud_count += 1
-
-                st.session_state.latencies.append(latency_ms)
-
-                record = {
-                    "Time": float(row["Time"]),
-                    "Amount": float(row["Amount"]),
-                    "Decision": decision,
-                    "Fraud Probability": round(probability, 4),
-                    "Latency (ms)": round(latency_ms, 2),
-                    "API Status": "OK",
-                }
-
-            except (
-                requests.RequestException,
-                ValueError,
-                KeyError,
-                TypeError,
-            ) as exc:
-                latency_ms = (
-                    time.perf_counter() - start_time
-                ) * 1000
-
-                st.session_state.api_errors += 1
-
-                record = {
-                    "Time": float(row["Time"]),
-                    "Amount": float(row["Amount"]),
-                    "Decision": "API_ERROR",
-                    "Fraud Probability": None,
-                    "Latency (ms)": round(latency_ms, 2),
-                    "API Status": str(exc)[:120],
-                }
-
-            st.session_state.results.insert(0, record)
-            st.session_state.next_index += 1
-
-            if st.session_state.next_index >= len(test_data):
-                st.session_state.streaming = False
-
-    # Always render metrics from the current session state.
-    results = st.session_state.results
-    latencies = st.session_state.latencies
-
-    average_latency = (
-        sum(latencies) / len(latencies)
-        if latencies else 0.0
+    st.download_button(
+        "⬇️ Download Results CSV",
+        data=display_df.to_csv(index=False).encode("utf-8"),
+        file_name="fraudshield_results.csv",
+        mime="text/csv",
     )
 
-    total_col, fraud_col, latency_col, errors_col = st.columns(4)
+    st.subheader("Prediction Summary")
 
-    total_col.metric(
-        "Transactions Scanned",
-        len(results),
+    summary = pd.DataFrame({
+        "Category": [
+            "Fraud",
+            "Legitimate",
+            "Prediction Error",
+        ],
+        "Count": [
+            fraud_count,
+            legitimate_count,
+            error_count,
+        ],
+    })
+
+    st.bar_chart(summary.set_index("Category"))
+
+else:
+    st.info(
+        "No predictions yet. Click Start Monitoring "
+        "in the sidebar to begin."
     )
-    fraud_col.metric(
-        "Frauds Flagged",
-        st.session_state.fraud_count,
-    )
-    latency_col.metric(
-        "Average API Latency",
-        f"{average_latency:.2f} ms",
-    )
-    errors_col.metric(
-        "API Errors",
-        st.session_state.api_errors,
-    )
-
-    st.subheader("Transaction Feed")
-    display_results()
-
-    if not st.session_state.streaming:
-        if st.session_state.next_index >= len(test_data):
-            st.success("All available sample transactions have been processed.")
-        elif not results:
-            st.info("Click Start / Restart Monitoring to begin.")
 
 
-transaction_monitor()
+# --------------------------------------------------
+# Footer
+# --------------------------------------------------
+
+st.divider()
+
+st.caption(
+    "FraudShield is a machine-learning demonstration. "
+    "Predictions are not a guarantee of fraud."
+)
