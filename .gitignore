@@ -35,3 +35,8 @@ data/*.zip
 models/*.pkl
 
 !models/xgboost_fraud_model_tuned.pkl
+# Local backups and accidental exports
+README_backup.md
+dashboard_backup*.py
+dashboard_new_backup.py
+dashboard_new.py.csv
